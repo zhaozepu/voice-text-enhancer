@@ -202,7 +202,7 @@ class VoiceTextEnhancerApp(rumps.App):
 
         super().__init__(
             name="VoiceTextEnhancer",
-            icon=icon_path,  # 使用PNG图标
+            icon=icon_path,  # 使用您提供的 PNG 图标
         )
 
         # 菜单项（status_item 不设回调即为不可点击）
@@ -266,7 +266,6 @@ class VoiceTextEnhancerApp(rumps.App):
 
         if not key:
             self.status_item.title = "⚠️ 未配置 API Key"
-            self.title = "⚠️"
         elif not acc or not inp:
             missing = []
             if not acc:
@@ -274,9 +273,7 @@ class VoiceTextEnhancerApp(rumps.App):
             if not inp:
                 missing.append("输入监控")
             self.status_item.title = f"⚠️ 缺少权限: {', '.join(missing)}"
-            self.title = "⚠️"
         else:
-            self.title = "✨"
             # 从「权限缺失」变成「权限齐全」时，自动重启服务让 worker 重启
             if not self._last_perms_ok:
                 logger.info("权限刚刚补齐，自动重启服务")
