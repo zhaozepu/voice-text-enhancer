@@ -40,17 +40,19 @@ def get_html(lottie_data: str) -> str:
 
         .lottie-box {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%) translateY(-10px);
             width: 120px;
             height: 120px;
             opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.3s ease, transform 0.3s ease;
             pointer-events: none;
         }
 
         .lottie-box.show {
             opacity: 1;
+            transform: translateX(-50%) translateY(0);
         }
     </style>
 </head>
@@ -141,8 +143,9 @@ def main():
 
     screen_w, screen_h, screen_x, screen_y = get_screen_size()
     win_w, win_h = 160, 160
-    x = screen_x + screen_w - win_w
-    y = screen_y
+    # 屏幕水平居中、贴齐顶部（菜单栏下方）
+    x = screen_x + (screen_w - win_w) // 2
+    y = screen_y + screen_h - win_h
 
     window = webview.create_window(
         'Notification',

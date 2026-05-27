@@ -170,14 +170,12 @@ class VoiceTextEnhancerApp(rumps.App):
 
     def __init__(self):
         super().__init__(
-            name="VTE",
-            title="✨",  # 菜单栏图标（emoji 简单可靠）
-            quit_button=None,
+            name="VoiceTextEnhancer",
+            title="✨",  # 菜单栏显示的图标
         )
 
-        # 菜单项
+        # 菜单项（status_item 不设回调即为不可点击）
         self.status_item = rumps.MenuItem("启动中…")
-        self.status_item.set_callback(None)  # 不可点击
 
         self.menu = [
             self.status_item,
@@ -185,8 +183,6 @@ class VoiceTextEnhancerApp(rumps.App):
             rumps.MenuItem("打开设置…", callback=self.open_settings),
             rumps.MenuItem("检查权限", callback=self.check_permissions),
             rumps.MenuItem("重启服务", callback=self.restart_service),
-            None,
-            rumps.MenuItem("退出", callback=self.quit_app),
         ]
 
         self.worker: Optional[BackgroundWorker] = None
@@ -287,16 +283,37 @@ class VoiceTextEnhancerApp(rumps.App):
         )
 
     def restart_service(self, _):
-        """重启后台 hotkey 服务"""
-        logger.info("重启服务")
-        if self.worker:
-            self.worker.stop()
-        self.start_background()
-        rumps.notification("服务已重启", "", "")
+        """重启整个应用进程（最可靠）"""
+        logger.info("重启应用进程")
 
-    def quit_app(self, _):
-        """退出应用"""
-        logger.info("用户点击退出")
+        # 启动新进程（独立 session，不受当前进程退出影响）
+        if getattr(sys, 'frozen', False):
+            cmd = [sys.executable]
+        else:
+            cmd = [sys.executable] + sys.argv
+
+        subprocess.Popen(
+            cmd,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env={**os.environ},
+        )
+
+        # 0.5 秒后退出当前进程（让新进程先启动）
+        threading.Timer(0.5, self._force_exit).start()
+
+    def _force_exit(self):
+        """强制退出，让新进程接管"""
+        try:
+            self.cleanup()
+        except Exception:
+            pass
+        os._exit(0)
+
+    def cleanup(self):
+        """退出前清理（atexit 触发）"""
+        logger.info("应用退出，清理资源")
         if self.worker:
             self.worker.stop()
         try:
@@ -308,11 +325,12 @@ class VoiceTextEnhancerApp(rumps.App):
                 self.settings_proc.terminate()
             except Exception:
                 pass
-        rumps.quit_application()
 
 
 def run():
     """启动菜单栏应用"""
+    import atexit
+
     # 初始化日志（用最小配置）
     log_dir = get_user_dir()
     log_file = log_dir / 'app.log'
@@ -327,4 +345,5 @@ def run():
     logger.info("=" * 50)
 
     app = VoiceTextEnhancerApp()
+    atexit.register(app.cleanup)
     app.run()
