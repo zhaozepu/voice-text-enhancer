@@ -28,7 +28,11 @@ from src.utils.permissions import (
     request_input_monitoring,
 )
 from src.utils.user_config import read_api_key, has_api_key, get_user_dir
-from src.utils.desktop_notification import shutdown_notification
+from src.utils.desktop_notification import (
+    shutdown_notification,
+    show_desktop_processing,
+    close_desktop_notification,
+)
 
 
 def get_settings_helper_script() -> Path:
@@ -123,6 +127,11 @@ class BackgroundWorker:
                 def make_callback(pname, pcontent):
                     def on_hotkey():
                         logger.info(f"快捷键触发: {pname}")
+
+                        # 立即显示处理动效
+                        if self.config.get('notifications', {}).get('show_processing', True):
+                            show_desktop_processing("正在处理文本，请稍候...")
+
                         # 临时修改配置中的active_prompt，让processor使用对应的prompt
                         original_active = self.config.get('active_prompt')
                         self.config['active_prompt'] = pname
@@ -145,6 +154,20 @@ class BackgroundWorker:
                     'callback': make_callback(prompt_name, prompt_content),
                     'name': prompt_name
                 })
+
+            # 添加 ESC 键绑定，用于取消任务
+            # 注意：只在有任务正在处理时才生效，避免对其他应用造成干扰
+            def on_cancel():
+                if self.processor and self.processor._processing:
+                    logger.info("ESC 键触发，取消任务")
+                    self.processor.cancel()
+                    close_desktop_notification()
+
+            bindings.append({
+                'hotkey': 'esc',
+                'callback': on_cancel,
+                'name': '取消任务'
+            })
 
             self.hotkey_listener = HotkeyListener(bindings)
             self.hotkey_listener.start()
@@ -212,13 +235,19 @@ class VoiceTextEnhancerApp(rumps.App):
             self.status_item,
             None,  # 分隔线
             rumps.MenuItem("打开设置…", callback=self.open_settings),
+            rumps.MenuItem("查看日志", callback=self.view_logs),
             rumps.MenuItem("检查权限", callback=self.check_permissions),
             rumps.MenuItem("重启服务", callback=self.restart_service),
         ]
 
         self.worker: Optional[BackgroundWorker] = None
         self.settings_proc: Optional[subprocess.Popen] = None
-        self._last_perms_ok: bool = False  # 上次检查权限是否齐全
+        # 初始化为当前权限状态，避免首次 _periodic_check 误判为"刚刚补齐"
+        # 而触发重复启动 worker（导致快捷键被监听两次）
+        self._last_perms_ok: bool = (
+            has_api_key() and check_accessibility() and check_input_monitoring()
+        )
+        self._restarting: bool = False  # 防止重启过程中再次触发重启
 
         # 启动后台
         rumps.Timer(self._initial_setup, 0.5).start()
@@ -275,9 +304,10 @@ class VoiceTextEnhancerApp(rumps.App):
             self.status_item.title = f"⚠️ 缺少权限: {', '.join(missing)}"
         else:
             # 从「权限缺失」变成「权限齐全」时，自动重启服务让 worker 重启
-            if not self._last_perms_ok:
+            if not self._last_perms_ok and not self._restarting:
                 logger.info("权限刚刚补齐，自动重启服务")
                 self.status_item.title = "● 启动中…"
+                self._restarting = True
                 # 在后台线程重启，避免阻塞 rumps 主线程
                 threading.Thread(target=self._do_restart_service, daemon=True).start()
 
@@ -285,9 +315,15 @@ class VoiceTextEnhancerApp(rumps.App):
 
     def _do_restart_service(self):
         """重启 worker（不重启整个进程）"""
-        if self.worker:
-            self.worker.stop()
-        self.start_background()
+        try:
+            if self.worker:
+                self.worker.stop()
+                # 给旧 listener 一点时间真正退出，避免两个 listener 同时监听
+                import time as _time
+                _time.sleep(0.3)
+            self.start_background()
+        finally:
+            self._restarting = False
 
     def open_settings(self, _):
         """打开设置窗口（独立子进程）"""
@@ -311,6 +347,19 @@ class VoiceTextEnhancerApp(rumps.App):
         except Exception as e:
             logger.error(f"打开设置失败: {e}")
             rumps.notification("打开设置失败", "", str(e))
+
+    def view_logs(self, _):
+        """查看日志文件"""
+        log_file = get_user_dir() / 'app.log'
+        if log_file.exists():
+            # 使用默认应用打开日志文件
+            subprocess.run(['open', str(log_file)])
+        else:
+            rumps.alert(
+                title="日志文件不存在",
+                message="日志文件尚未生成",
+                ok="知道了"
+            )
 
     def check_permissions(self, _):
         """手动触发权限检查"""

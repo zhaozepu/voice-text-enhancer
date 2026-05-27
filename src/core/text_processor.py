@@ -33,6 +33,13 @@ class TextProcessor:
         self.config = config
         self.clipboard_mgr = ClipboardManager()
         self._processing = False
+        self._cancelled = False
+
+    def cancel(self):
+        """取消当前处理任务"""
+        if self._processing:
+            logger.info("收到取消请求，正在取消任务...")
+            self._cancelled = True
 
     async def process_selected_text(self):
         """
@@ -44,15 +51,23 @@ class TextProcessor:
             return
 
         self._processing = True
+        self._cancelled = False  # 重置取消标志
 
         try:
             await self._do_process()
+        except asyncio.CancelledError:
+            logger.info("任务已被用户取消")
+            close_fancy_notification()
+            await asyncio.sleep(0.1)
+            if self.config.get('notifications', {}).get('show_errors', True):
+                show_fancy_error("✗ 已取消", duration=1.5)
         except Exception as e:
             logger.exception("处理文本时发生异常")
             if self.config.get('notifications', {}).get('show_errors', True):
                 show_error(f"处理失败: {str(e)}")
         finally:
             self._processing = False
+            self._cancelled = False
 
     async def _do_process(self):
         """
@@ -71,18 +86,25 @@ class TextProcessor:
                 logger.info("无文本可处理（光标可能不在输入框），静默跳过")
                 return
 
-            # 文本与原剪贴板完全相同 → Cmd+A/C 没生效（可能不在输入框），静默返回
-            if selected_text == original_clipboard:
-                logger.info("文本与剪贴板内容一致，可能不在输入框，静默跳过")
+            # 如果文本很短（≤3字符）且与剪贴板一致，可能是误触，静默跳过
+            if len(selected_text.strip()) <= 3 and selected_text == original_clipboard:
+                logger.info("文本过短且与剪贴板一致，可能是误触，静默跳过")
                 return
 
             logger.info(f"获取到选中文本，长度: {len(selected_text)}")
 
-            # 显示漂亮的处理中通知
-            if self.config.get('notifications', {}).get('show_processing', True):
-                show_fancy_processing("正在处理文本，请稍候...")
+            # 检查是否被取消
+            if self._cancelled:
+                logger.info("任务在获取文本后被取消")
+                raise asyncio.CancelledError()
 
+            # 动效已在快捷键触发时显示，这里直接处理
             enhanced_text = await self._enhance_text(selected_text)
+
+            # 检查是否被取消
+            if self._cancelled:
+                logger.info("任务在 API 调用后被取消")
+                raise asyncio.CancelledError()
 
             if not enhanced_text or not enhanced_text.strip():
                 raise ValueError("API 返回了空文本")

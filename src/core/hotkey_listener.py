@@ -39,7 +39,7 @@ class HotkeyListener:
             callback = binding['callback']
             name = binding.get('name', hotkey_str)
 
-            if hotkey_str in ['right_option', 'right_alt', 'left_option', 'left_alt', 'right_cmd', 'right_ctrl']:
+            if hotkey_str in ['right_option', 'right_alt', 'left_option', 'left_alt', 'right_cmd', 'right_ctrl', 'esc']:
                 # 单键模式
                 key_obj = self._parse_single_key(hotkey_str)
                 if key_obj:
@@ -83,6 +83,7 @@ class HotkeyListener:
             'left_alt': Key.alt,
             'right_cmd': Key.cmd_r,
             'right_ctrl': Key.ctrl_r,
+            'esc': Key.esc,
         }
         return key_map.get(key_name)
 
@@ -119,8 +120,11 @@ class HotkeyListener:
                 release_time = time.time()
                 press_duration = release_time - binding['last_press_time']
 
-                # 只在快速按下释放时触发（< 0.5秒），防止长按误触
-                if press_duration < 0.5:
+                # ESC 键总是触发（用于取消任务），其他键只在快速按下释放时触发
+                is_esc = (key == Key.esc)
+                should_trigger = is_esc or (press_duration < 0.5)
+
+                if should_trigger:
                     logger.debug(f"单键触发: {binding['name']}，按压时长: {press_duration:.3f}秒")
                     try:
                         binding['callback']()
