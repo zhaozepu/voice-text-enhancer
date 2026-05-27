@@ -83,7 +83,7 @@ class HotkeyListener:
             if key == self.target_key:
                 self.key_pressed = True
                 self.last_press_time = time.time()
-                logger.debug(f"目标键按下: {key}")
+                logger.info(f"目标键按下: {key}")
         else:
             # 组合键模式
             try:
