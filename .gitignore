@@ -43,6 +43,7 @@ config.yaml
 .DS_Store
 .AppleDouble
 .LSOverride
+._*
 
 # 测试
 .pytest_cache/
@@ -51,3 +52,7 @@ htmlcov/
 
 # 应用数据
 ~/.voice-text-enhancer/
+
+# 图标源文件（保留 icon.icns 用于发布）
+icon.iconset/
+icon.png
