@@ -3,7 +3,16 @@
 Voice Text Enhancer - 文本增强工具
 主入口程序
 """
+import os
 import sys
+
+# 打包模式下，作为通知 helper 启动时直接进入 helper 主循环
+# （子进程通过环境变量切换模式，避免重新启动整个应用）
+if os.environ.get('VTE_HELPER_MODE') == '1':
+    from src.utils.notification_helper import main as helper_main
+    helper_main()
+    sys.exit(0)
+
 import asyncio
 from pathlib import Path
 from loguru import logger
@@ -21,7 +30,11 @@ from src.api.deepseek_client import DeepSeekClient
 from src.utils.config_loader import ConfigLoader
 from src.utils.logger import setup_logger
 from src.utils.notifications import show_info, show_error
-from src.utils.fancy_notification import show_fancy_info, show_fancy_error
+from src.utils.desktop_notification import (
+    show_desktop_info as show_fancy_info,
+    show_desktop_error as show_fancy_error,
+    shutdown_notification,
+)
 
 
 def check_permissions():
@@ -179,6 +192,7 @@ async def main():
         if 'api_client' in locals():
             await api_client.close()
 
+        shutdown_notification()
         show_info("文本增强工具已停止")
         logger.info("程序已退出")
 

@@ -7,6 +7,7 @@ added_files = [
     ('config.example.yaml', '.'),
     ('.env.example', '.'),
     ('src', 'src'),
+    ('assets', 'assets'),
 ]
 
 a = Analysis(
@@ -20,7 +21,10 @@ a = Analysis(
         'pyobjc-framework-Cocoa',
         'pyobjc-framework-Quartz',
         'pyobjc-framework-ApplicationServices',
+        'pyobjc-framework-WebKit',
         'pyobjc-core',
+        'webview',
+        'webview.platforms.cocoa',
     ],
     hookspath=[],
     hooksconfig={},

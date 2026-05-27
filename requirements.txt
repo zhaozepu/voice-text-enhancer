@@ -19,6 +19,9 @@ python-dotenv>=1.0.0
 # 日志库
 loguru>=0.7.0
 
+# 桌面浮层通知（Lottie 动画）
+pywebview>=6.0
+
 # 类型提示
 typing-extensions>=4.9.0
 

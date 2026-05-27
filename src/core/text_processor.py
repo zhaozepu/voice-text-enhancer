@@ -10,11 +10,11 @@ from loguru import logger
 from .clipboard_manager import ClipboardManager
 from ..api.deepseek_client import DeepSeekClient
 from ..utils.notifications import show_info, show_error, show_success
-from ..utils.fancy_notification import (
-    show_fancy_processing,
-    show_fancy_success,
-    show_fancy_error,
-    close_fancy_notification
+from ..utils.desktop_notification import (
+    show_desktop_processing as show_fancy_processing,
+    show_desktop_success as show_fancy_success,
+    show_desktop_error as show_fancy_error,
+    close_desktop_notification as close_fancy_notification,
 )
 
 
