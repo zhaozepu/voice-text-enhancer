@@ -134,6 +134,53 @@ def get_screen_size():
         return 1920, 1080, 0, 0
 
 
+def configure_window_for_fullscreen():
+    """
+    把 pywebview 的 NSWindow 配置成可在所有 Space（含全屏 Space）显示。
+    需要等窗口创建后调用。
+    """
+    import time
+    try:
+        from AppKit import (
+            NSApp,
+            NSWindowCollectionBehaviorCanJoinAllSpaces,
+            NSWindowCollectionBehaviorStationary,
+            NSWindowCollectionBehaviorFullScreenAuxiliary,
+            NSWindowCollectionBehaviorIgnoresCycle,
+        )
+
+        # 屏保级别：高于全屏应用
+        SCREEN_SAVER_LEVEL = 1000
+
+        # 跨 Space + 全屏辅助 + 静止（不随 Space 切换）
+        behavior = (
+            NSWindowCollectionBehaviorCanJoinAllSpaces
+            | NSWindowCollectionBehaviorStationary
+            | NSWindowCollectionBehaviorFullScreenAuxiliary
+            | NSWindowCollectionBehaviorIgnoresCycle
+        )
+
+        # 轮询找到我们的窗口（pywebview 内部异步创建）
+        for _ in range(100):
+            time.sleep(0.05)
+            try:
+                windows = list(NSApp.windows()) if NSApp else []
+            except Exception:
+                continue
+            for win in windows:
+                try:
+                    title = str(win.title()) if win.title() else ''
+                except Exception:
+                    title = ''
+                if title == 'Notification':
+                    win.setCollectionBehavior_(behavior)
+                    win.setLevel_(SCREEN_SAVER_LEVEL)
+                    win.setIgnoresMouseEvents_(True)  # 鼠标穿透
+                    return
+    except Exception as e:
+        print(f"configure_window_for_fullscreen: {e}", file=sys.stderr)
+
+
 def main():
     """主函数 - 在主线程运行 webview"""
     import webview
@@ -160,6 +207,9 @@ def main():
         on_top=True,
         transparent=True,
     )
+
+    # 后台线程：窗口创建后配置跨 Space + 屏保级别（覆盖全屏应用）
+    threading.Thread(target=configure_window_for_fullscreen, daemon=True).start()
 
     def stdin_listener():
         """监听 stdin 命令"""
