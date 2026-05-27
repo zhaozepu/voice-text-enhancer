@@ -1,0 +1,27 @@
+# HTTP 客户端
+httpx>=0.27.0
+
+# 剪贴板操作
+pyperclip>=1.8.2
+
+# GUI 自动化 (模拟键盘)
+pyautogui>=0.9.54
+
+# 键盘/鼠标监听
+pynput>=1.7.6
+
+# YAML 配置解析
+PyYAML>=6.0
+
+# 环境变量加载
+python-dotenv>=1.0.0
+
+# 日志库
+loguru>=0.7.0
+
+# 类型提示
+typing-extensions>=4.9.0
+
+# 测试
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
