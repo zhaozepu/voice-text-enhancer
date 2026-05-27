@@ -134,12 +134,10 @@ def get_screen_size():
         return 1920, 1080, 0, 0
 
 
-def configure_window_for_fullscreen():
+def _apply_window_config_on_main_thread():
     """
-    把 pywebview 的 NSWindow 配置成可在所有 Space（含全屏 Space）显示。
-    需要等窗口创建后调用。
+    在主线程上执行实际的窗口配置（NSWindow 操作必须在主线程）
     """
-    import time
     try:
         from AppKit import (
             NSApp,
@@ -149,10 +147,8 @@ def configure_window_for_fullscreen():
             NSWindowCollectionBehaviorIgnoresCycle,
         )
 
-        # 屏保级别：高于全屏应用
         SCREEN_SAVER_LEVEL = 1000
 
-        # 跨 Space + 全屏辅助 + 静止（不随 Space 切换）
         behavior = (
             NSWindowCollectionBehaviorCanJoinAllSpaces
             | NSWindowCollectionBehaviorStationary
@@ -160,23 +156,60 @@ def configure_window_for_fullscreen():
             | NSWindowCollectionBehaviorIgnoresCycle
         )
 
-        # 轮询找到我们的窗口（pywebview 内部异步创建）
+        windows = list(NSApp.windows()) if NSApp else []
+        for win in windows:
+            try:
+                title = str(win.title()) if win.title() else ''
+            except Exception:
+                title = ''
+            if title == 'Notification':
+                win.setCollectionBehavior_(behavior)
+                win.setLevel_(SCREEN_SAVER_LEVEL)
+                win.setIgnoresMouseEvents_(True)
+                return True
+    except Exception as e:
+        print(f"_apply_window_config_on_main_thread: {e}", file=sys.stderr)
+    return False
+
+
+def configure_window_for_fullscreen():
+    """
+    把 pywebview 的 NSWindow 配置成可在所有 Space（含全屏 Space）显示。
+    使用 GCD 调度到主线程执行（NSWindow 操作必须在主线程）。
+    """
+    import time
+    try:
+        from Foundation import NSObject
+        import objc
+
+        # 创建一个 helper 对象，用于在主线程上执行配置
+        class _ConfigHelper(NSObject):
+            def applyConfig_(self, _):
+                _apply_window_config_on_main_thread()
+
+        helper = _ConfigHelper.alloc().init()
+
+        # 轮询：在主线程上调用，直到窗口创建完成
         for _ in range(100):
             time.sleep(0.05)
+            # performSelectorOnMainThread 是线程安全的，会把调用调度到主线程
             try:
-                windows = list(NSApp.windows()) if NSApp else []
+                helper.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "applyConfig:", None, True
+                )
+                # 检查是否成功（窗口已找到并配置）
+                from AppKit import NSApp
+                if NSApp:
+                    windows = list(NSApp.windows())
+                    for win in windows:
+                        try:
+                            title = str(win.title()) if win.title() else ''
+                        except Exception:
+                            title = ''
+                        if title == 'Notification':
+                            return
             except Exception:
                 continue
-            for win in windows:
-                try:
-                    title = str(win.title()) if win.title() else ''
-                except Exception:
-                    title = ''
-                if title == 'Notification':
-                    win.setCollectionBehavior_(behavior)
-                    win.setLevel_(SCREEN_SAVER_LEVEL)
-                    win.setIgnoresMouseEvents_(True)  # 鼠标穿透
-                    return
     except Exception as e:
         print(f"configure_window_for_fullscreen: {e}", file=sys.stderr)
 
