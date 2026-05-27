@@ -187,6 +187,7 @@ class VoiceTextEnhancerApp(rumps.App):
 
         self.worker: Optional[BackgroundWorker] = None
         self.settings_proc: Optional[subprocess.Popen] = None
+        self._last_perms_ok: bool = False  # 上次检查权限是否齐全
 
         # 启动后台
         rumps.Timer(self._initial_setup, 0.5).start()
@@ -222,6 +223,7 @@ class VoiceTextEnhancerApp(rumps.App):
         acc = check_accessibility()
         inp = check_input_monitoring()
         key = has_api_key()
+        all_ok = key and acc and inp
 
         if not key:
             self.status_item.title = "⚠️ 未配置 API Key"
@@ -235,8 +237,21 @@ class VoiceTextEnhancerApp(rumps.App):
             self.status_item.title = f"⚠️ 缺少权限: {', '.join(missing)}"
             self.title = "⚠️"
         else:
-            # 权限齐全，状态由 worker 更新
             self.title = "✨"
+            # 从「权限缺失」变成「权限齐全」时，自动重启服务让 worker 重启
+            if not self._last_perms_ok:
+                logger.info("权限刚刚补齐，自动重启服务")
+                self.status_item.title = "● 启动中…"
+                # 在后台线程重启，避免阻塞 rumps 主线程
+                threading.Thread(target=self._do_restart_service, daemon=True).start()
+
+        self._last_perms_ok = all_ok
+
+    def _do_restart_service(self):
+        """重启 worker（不重启整个进程）"""
+        if self.worker:
+            self.worker.stop()
+        self.start_background()
 
     def open_settings(self, _):
         """打开设置窗口（独立子进程）"""

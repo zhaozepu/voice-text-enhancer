@@ -66,14 +66,15 @@ class TextProcessor:
             selected_text = await self._get_selected_text()
             logger.info(f"获取到的文本: '{selected_text[:50] if selected_text else '(空)'}...'，长度: {len(selected_text) if selected_text else 0}")
 
+            # 文本为空 → 当前不在输入框或输入框为空，静默返回
             if not selected_text or not selected_text.strip():
-                logger.warning("未获取到文本或文本为空")
-                if self.config.get('notifications', {}).get('show_errors', True):
-                    show_fancy_error("请先在输入框中输入文本", duration=3)
+                logger.info("无文本可处理（光标可能不在输入框），静默跳过")
                 return
 
+            # 文本与原剪贴板完全相同 → Cmd+A/C 没生效（可能不在输入框），静默返回
             if selected_text == original_clipboard:
-                logger.warning("选中的文本与剪贴板内容相同，可能没有实际选中文本")
+                logger.info("文本与剪贴板内容一致，可能不在输入框，静默跳过")
+                return
 
             logger.info(f"获取到选中文本，长度: {len(selected_text)}")
 
