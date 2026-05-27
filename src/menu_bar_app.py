@@ -109,24 +109,52 @@ class BackgroundWorker:
             )
             self.processor = TextProcessor(self.api_client, self.config)
 
-            # 启动 hotkey listener
-            hotkey_trigger = self.config['hotkey']['trigger']
+            # 启动 hotkey listener - 支持多个快捷键绑定
             loop = asyncio.get_running_loop()
+            bindings = []
 
-            def on_hotkey():
-                logger.info("快捷键被触发")
-                asyncio.run_coroutine_threadsafe(
-                    self.processor.process_selected_text(), loop
-                )
+            # 从配置中读取所有快捷键绑定（已由ConfigLoader规范化为hotkey_bindings）
+            for binding in self.config.get('hotkey_bindings', []):
+                hotkey_str = binding['hotkey']
+                prompt_name = binding['prompt_name']
+                prompt_content = binding['prompt_content']
 
-            self.hotkey_listener = HotkeyListener(hotkey_trigger, on_hotkey)
+                # 为每个绑定创建一个闭包回调
+                def make_callback(pname, pcontent):
+                    def on_hotkey():
+                        logger.info(f"快捷键触发: {pname}")
+                        # 临时修改配置中的active_prompt，让processor使用对应的prompt
+                        original_active = self.config.get('active_prompt')
+                        self.config['active_prompt'] = pname
+                        # 临时注入prompt内容
+                        if 'prompts' not in self.config:
+                            self.config['prompts'] = {}
+                        self.config['prompts'][pname] = pcontent
+
+                        asyncio.run_coroutine_threadsafe(
+                            self.processor.process_selected_text(), loop
+                        )
+
+                        # 恢复原active_prompt（可选）
+                        if original_active:
+                            self.config['active_prompt'] = original_active
+                    return on_hotkey
+
+                bindings.append({
+                    'hotkey': hotkey_str,
+                    'callback': make_callback(prompt_name, prompt_content),
+                    'name': prompt_name
+                })
+
+            self.hotkey_listener = HotkeyListener(bindings)
             self.hotkey_listener.start()
 
             await asyncio.sleep(0.3)
 
             if self.hotkey_listener.is_running():
-                logger.info(f"✓ 监听快捷键: {hotkey_trigger}")
-                self._notify_status(f"● 运行中 ({hotkey_trigger})")
+                hotkey_names = ', '.join([b['hotkey'] for b in bindings])
+                logger.info(f"✓ 监听快捷键: {hotkey_names}")
+                self._notify_status(f"● 运行中 ({len(bindings)}个快捷键)")
             else:
                 self._notify_status("⚠️ 快捷键监听启动失败")
 
@@ -169,9 +197,12 @@ class VoiceTextEnhancerApp(rumps.App):
     """菜单栏应用"""
 
     def __init__(self):
+        # 获取图标路径
+        icon_path = self._get_icon_path()
+
         super().__init__(
             name="VoiceTextEnhancer",
-            title="✨",  # 菜单栏显示的图标
+            icon=icon_path,  # 使用PNG图标
         )
 
         # 菜单项（status_item 不设回调即为不可点击）
@@ -193,6 +224,14 @@ class VoiceTextEnhancerApp(rumps.App):
         rumps.Timer(self._initial_setup, 0.5).start()
         # 定期检查权限并更新状态
         rumps.Timer(self._periodic_check, 5).start()
+
+    def _get_icon_path(self) -> str:
+        """获取菜单栏图标路径（兼容打包模式）"""
+        if getattr(sys, 'frozen', False):
+            base = Path(sys._MEIPASS)
+        else:
+            base = Path(__file__).parent.parent
+        return str(base / 'assets' / 'menubar_icon.png')
 
     def _initial_setup(self, sender):
         """启动后立即执行一次初始化"""

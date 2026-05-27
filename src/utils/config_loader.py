@@ -61,13 +61,14 @@ class ConfigLoader:
         config['api']['key'] = api_key
 
         self._validate_config(config)
+        self._normalize_config(config)
 
         logger.info("配置加载成功")
         return config
 
     def _validate_config(self, config: Dict[str, Any]):
         """
-        验证配置
+        验证配置（支持新旧两种格式）
 
         Args:
             config: 配置字典
@@ -75,18 +76,58 @@ class ConfigLoader:
         Raises:
             ValueError: 配置不完整或格式错误
         """
-        required_keys = ['api', 'hotkey', 'prompts', 'active_prompt']
-        for key in required_keys:
-            if key not in config:
-                raise ValueError(f"配置缺少必需字段: {key}")
+        # 检查是否使用新格式（hotkey_bindings）
+        if 'hotkey_bindings' in config:
+            # 新格式：验证每个绑定
+            if not isinstance(config['hotkey_bindings'], list):
+                raise ValueError("hotkey_bindings 必须是列表")
 
-        if 'trigger' not in config['hotkey']:
-            raise ValueError("配置缺少 hotkey.trigger 字段")
+            if not config['hotkey_bindings']:
+                raise ValueError("hotkey_bindings 不能为空")
 
-        active_prompt = config['active_prompt']
-        if active_prompt not in config['prompts']:
-            raise ValueError(
-                f"active_prompt '{active_prompt}' 在 prompts 中不存在"
-            )
+            for i, binding in enumerate(config['hotkey_bindings']):
+                if 'hotkey' not in binding:
+                    raise ValueError(f"hotkey_bindings[{i}] 缺少 hotkey 字段")
+                if 'prompt_name' not in binding:
+                    raise ValueError(f"hotkey_bindings[{i}] 缺少 prompt_name 字段")
+                if 'prompt_content' not in binding:
+                    raise ValueError(f"hotkey_bindings[{i}] 缺少 prompt_content 字段")
+        else:
+            # 旧格式：验证必需字段
+            required_keys = ['hotkey', 'prompts', 'active_prompt']
+            for key in required_keys:
+                if key not in config:
+                    raise ValueError(f"配置缺少必需字段: {key}")
+
+            if 'trigger' not in config['hotkey']:
+                raise ValueError("配置缺少 hotkey.trigger 字段")
+
+            active_prompt = config['active_prompt']
+            if active_prompt not in config['prompts']:
+                raise ValueError(
+                    f"active_prompt '{active_prompt}' 在 prompts 中不存在"
+                )
 
         logger.debug("配置验证通过")
+
+    def _normalize_config(self, config: Dict[str, Any]):
+        """
+        规范化配置：将旧格式转换为新格式
+
+        Args:
+            config: 配置字典
+        """
+        if 'hotkey_bindings' not in config:
+            # 从旧格式转换为新格式
+            hotkey = config['hotkey']['trigger']
+            active_prompt = config['active_prompt']
+            prompt_content = config['prompts'][active_prompt]
+
+            config['hotkey_bindings'] = [
+                {
+                    'hotkey': hotkey,
+                    'prompt_name': active_prompt,
+                    'prompt_content': prompt_content,
+                }
+            ]
+            logger.info("已将旧格式配置转换为新格式")
