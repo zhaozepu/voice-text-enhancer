@@ -54,6 +54,13 @@ def get_html(lottie_data: str) -> str:
             opacity: 1;
             transform: translateX(-50%) translateY(0);
         }
+
+        /* 暗色模式下反相，让黑色动效在深色背景下可见 */
+        @media (prefers-color-scheme: dark) {
+            .lottie-box {
+                filter: invert(1) hue-rotate(180deg);
+            }
+        }
     </style>
 </head>
 <body>
@@ -214,9 +221,21 @@ def configure_window_for_fullscreen():
         print(f"configure_window_for_fullscreen: {e}", file=sys.stderr)
 
 
+def hide_dock_icon():
+    """将当前进程设置为 Accessory（不在 Dock 显示图标）"""
+    try:
+        from AppKit import NSApplication
+        # NSApplicationActivationPolicyAccessory = 1
+        NSApplication.sharedApplication().setActivationPolicy_(1)
+    except Exception as e:
+        print(f"hide_dock_icon: {e}", file=sys.stderr)
+
+
 def main():
     """主函数 - 在主线程运行 webview"""
     import webview
+
+    hide_dock_icon()
 
     lottie_data = read_lottie_data()
     html = get_html(lottie_data)

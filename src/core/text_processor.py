@@ -91,6 +91,19 @@ class TextProcessor:
                 logger.info("文本过短且与剪贴板一致，可能是误触，静默跳过")
                 return
 
+            # 文本超长（大概率为误操作，例如全选了整篇文档），不发起 API 请求
+            max_length = self.config.get('max_input_length', 5000)
+            if len(selected_text) > max_length:
+                logger.warning(f"文本长度 {len(selected_text)} 超过上限 {max_length}，疑似误操作，跳过")
+                close_fancy_notification()
+                await asyncio.sleep(0.1)
+                if self.config.get('notifications', {}).get('show_errors', True):
+                    show_fancy_error(
+                        f"✗ 文本过长（{len(selected_text)}字），疑似误操作",
+                        duration=2.5,
+                    )
+                return
+
             logger.info(f"获取到选中文本，长度: {len(selected_text)}")
 
             # 检查是否被取消

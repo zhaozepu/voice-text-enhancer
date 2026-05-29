@@ -427,6 +427,16 @@ class VoiceTextEnhancerApp(rumps.App):
                 pass
 
 
+def _hide_dock_icon():
+    """将主进程设置为 Accessory（不在 Dock 显示图标，仅菜单栏）"""
+    try:
+        from AppKit import NSApplication
+        # NSApplicationActivationPolicyAccessory = 1
+        NSApplication.sharedApplication().setActivationPolicy_(1)
+    except Exception as e:
+        logger.warning(f"隐藏 Dock 图标失败: {e}")
+
+
 def run():
     """启动菜单栏应用"""
     import atexit
@@ -437,6 +447,9 @@ def run():
     logger.remove()
     logger.add(sys.stderr, level="INFO")
     logger.add(str(log_file), level="INFO", rotation="10 MB", retention="7 days")
+
+    # 隐藏 Dock 图标（开发模式也生效；打包模式由 LSUIElement 处理但再设一次无害）
+    _hide_dock_icon()
 
     logger.info("=" * 50)
     logger.info("Voice Text Enhancer 菜单栏应用启动")

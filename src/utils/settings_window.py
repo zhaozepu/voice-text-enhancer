@@ -666,9 +666,21 @@ class API:
         subprocess.Popen(["open", url])
 
 
+def _hide_dock_icon():
+    """将设置子进程设为 Accessory（不在 Dock 显示图标）"""
+    try:
+        from AppKit import NSApplication
+        # NSApplicationActivationPolicyAccessory = 1
+        NSApplication.sharedApplication().setActivationPolicy_(1)
+    except Exception:
+        pass
+
+
 def main():
     """在主线程运行 webview"""
     import webview
+
+    _hide_dock_icon()
 
     api = API()
     window = webview.create_window(
