@@ -147,6 +147,14 @@ def close_desktop_notification():
     _get_process().send_command({'action': 'hide'})
 
 
+def set_dot_count(count: int):
+    """更新暂存上下文圆点数量（0 表示隐藏）"""
+    try:
+        _get_process().send_command({'action': 'dots', 'count': int(count)})
+    except Exception as e:
+        logger.warning(f"更新圆点失败: {e}")
+
+
 def shutdown_notification():
     """关闭通知进程（程序退出时调用）"""
     global _notif_process

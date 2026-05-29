@@ -26,12 +26,14 @@ from src.utils.permissions import (
     open_accessibility_settings,
     open_input_monitoring_settings,
     request_input_monitoring,
+    reset_permissions,
 )
 from src.utils.user_config import read_api_key, has_api_key, get_user_dir
 from src.utils.desktop_notification import (
     shutdown_notification,
     show_desktop_processing,
     close_desktop_notification,
+    set_dot_count,
 )
 
 
@@ -54,6 +56,9 @@ class BackgroundWorker:
         self.config: Optional[dict] = None
         self.on_status_change = on_status_change
         self._running = False
+        # OCR 上下文暂存区：组合键触发时往这里 append，单键处理时取出并清空
+        self._ocr_buffer: list = []
+        self._ocr_buffer_lock = threading.Lock()
 
     def start(self):
         """启动后台线程"""
@@ -128,6 +133,18 @@ class BackgroundWorker:
                     def on_hotkey():
                         logger.info(f"快捷键触发: {pname}")
 
+                        # 取出暂存的 OCR 上下文并清空
+                        with self._ocr_buffer_lock:
+                            screen_contexts = list(self._ocr_buffer)
+                            self._ocr_buffer.clear()
+                        if screen_contexts:
+                            logger.info(f"携带 {len(screen_contexts)} 段暂存的屏幕上下文进入处理流程")
+                        # 清空圆点指示
+                        try:
+                            set_dot_count(0)
+                        except Exception:
+                            pass
+
                         # 立即显示处理动效
                         if self.config.get('notifications', {}).get('show_processing', True):
                             show_desktop_processing("正在处理文本，请稍候...")
@@ -141,7 +158,10 @@ class BackgroundWorker:
                         self.config['prompts'][pname] = pcontent
 
                         asyncio.run_coroutine_threadsafe(
-                            self.processor.process_selected_text(), loop
+                            self.processor.process_selected_text(
+                                screen_contexts=screen_contexts if screen_contexts else None,
+                            ),
+                            loop,
                         )
 
                         # 恢复原active_prompt（可选）
@@ -164,35 +184,59 @@ class BackgroundWorker:
             for binding in screenshot_cfgs:
                 hotkey_str = binding['hotkey']  # 形如 "left_option+right_option"
                 prompt_name = binding.get('prompt_name', 'typeless')
-                prompt_content = binding.get('prompt_content', '')
 
-                def make_combo_callback(pname, pcontent):
+                # 组合键现在的语义：仅做 OCR 并把结果暂存到 buffer，不调用模型
+                def make_combo_callback(pname):
                     def on_combo():
-                        logger.info(f"组合键触发(带截屏): {pname}")
-                        if self.config.get('notifications', {}).get('show_processing', True):
-                            show_desktop_processing("正在截屏并处理…")
-                        self.config['active_prompt'] = pname
-                        if 'prompts' not in self.config:
-                            self.config['prompts'] = {}
-                        self.config['prompts'][pname] = pcontent
-                        asyncio.run_coroutine_threadsafe(
-                            self.processor.process_selected_text(with_screenshot=True), loop
-                        )
+                        logger.info(f"组合键触发(暂存 OCR): {pname}")
+
+                        async def _capture_and_buffer():
+                            try:
+                                text = await self.processor.capture_ocr_only()
+                                if text and text.strip():
+                                    with self._ocr_buffer_lock:
+                                        self._ocr_buffer.append(text)
+                                        count = len(self._ocr_buffer)
+                                    logger.info(f"已暂存 OCR 上下文，当前共 {count} 段")
+                                    try:
+                                        set_dot_count(count)
+                                    except Exception:
+                                        pass
+                                else:
+                                    logger.warning("OCR 文本为空，跳过暂存")
+                            except Exception as e:
+                                logger.exception(f"暂存 OCR 失败: {e}")
+
+                        asyncio.run_coroutine_threadsafe(_capture_and_buffer(), loop)
                     return on_combo
 
                 bindings.append({
                     'hotkey': hotkey_str,
-                    'callback': make_combo_callback(prompt_name, prompt_content),
-                    'name': f"{prompt_name}(截屏)",
+                    'callback': make_combo_callback(prompt_name),
+                    'name': f"{prompt_name}(暂存OCR)",
                 })
 
-            # 添加 ESC 键绑定，用于取消任务
-            # 注意：只在有任务正在处理时才生效，避免对其他应用造成干扰
+            # 添加 ESC 键绑定：用于取消任务 / 清空暂存的 OCR 上下文
+            # 1. 任务进行中 → 取消任务
+            # 2. 暂存区有数据 → 清空 buffer + 圆点（无任务时）
+            # 3. 都没有 → 无作用，避免对其他应用造成干扰
             def on_cancel():
                 if self.processor and self.processor._processing:
                     logger.info("ESC 键触发，取消任务")
                     self.processor.cancel()
                     close_desktop_notification()
+                    return
+
+                # 任务未在进行：尝试清空暂存
+                with self._ocr_buffer_lock:
+                    had_buffered = bool(self._ocr_buffer)
+                    self._ocr_buffer.clear()
+                if had_buffered:
+                    logger.info("ESC 键触发，清空暂存的 OCR 上下文")
+                    try:
+                        set_dot_count(0)
+                    except Exception:
+                        pass
 
             bindings.append({
                 'hotkey': 'esc',
@@ -268,6 +312,7 @@ class VoiceTextEnhancerApp(rumps.App):
             rumps.MenuItem("打开设置…", callback=self.open_settings),
             rumps.MenuItem("查看日志", callback=self.view_logs),
             rumps.MenuItem("检查权限", callback=self.check_permissions),
+            rumps.MenuItem("重置权限", callback=self.reset_permissions),
             rumps.MenuItem("重启服务", callback=self.restart_service),
         ]
 
@@ -412,6 +457,44 @@ class VoiceTextEnhancerApp(rumps.App):
             message="\n".join(msgs) + "\n\n点击「打开设置…」配置缺失权限",
             ok="知道了"
         )
+
+    def reset_permissions(self, _):
+        """重置应用的系统权限（用于重新打包后清理旧权限）"""
+        # 先确认
+        response = rumps.alert(
+            title="重置权限",
+            message="此操作将删除系统中保存的「润色」应用权限配置。\n\n"
+                    "重置后需要：\n"
+                    "1. 重启本应用\n"
+                    "2. 在系统设置中重新授权\n\n"
+                    "适用场景：重新打包应用后，旧的权限配置失效时使用。\n\n"
+                    "是否继续？",
+            ok="继续重置",
+            cancel="取消"
+        )
+
+        if response != 1:  # 1 = OK button
+            return
+
+        logger.info("用户确认重置权限")
+
+        # 执行重置
+        success, message = reset_permissions()
+
+        if success:
+            rumps.alert(
+                title="重置成功",
+                message=f"{message}\n\n请重启应用并重新授权。",
+                ok="知道了"
+            )
+            logger.info("权限重置成功")
+        else:
+            rumps.alert(
+                title="重置遇到问题",
+                message=f"{message}\n\n部分权限可能需要手动在系统设置中删除。",
+                ok="知道了"
+            )
+            logger.warning("权限重置部分失败")
 
     def restart_service(self, _):
         """重启整个应用进程（最可靠）"""

@@ -140,6 +140,38 @@ def get_html(lottie_data: str) -> str:
             0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
             50%     { opacity: 0.85; transform: translate(-50%, -50%) scale(1.12); }
         }
+
+        /* 暂存上下文圆点指示 */
+        .dots {
+            position: fixed;
+            top: 76px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 6px;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            pointer-events: none;
+            padding: 5px 10px;
+            background: rgba(20, 20, 30, 0.55);
+            border-radius: 999px;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+        }
+        .dots.show { opacity: 1; }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #ffd6e0 0%, #ff4d8d 60%, #c1004d 100%);
+            box-shadow: 0 0 6px rgba(255, 80, 140, 0.7);
+            animation: dot-pop 0.35s ease;
+        }
+        @keyframes dot-pop {
+            0%   { transform: scale(0); opacity: 0; }
+            60%  { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -147,6 +179,8 @@ def get_html(lottie_data: str) -> str:
         <div class="ring"></div>
         <div class="core"></div>
     </div>
+
+    <div class="dots" id="dots"></div>
 
     <script>
         let hideTimer = null;
@@ -172,8 +206,26 @@ def get_html(lottie_data: str) -> str:
             box.classList.remove('show');
         }
 
+        function setDotCount(count) {
+            const container = document.getElementById('dots');
+            const safe = Math.max(0, parseInt(count, 10) || 0);
+            container.innerHTML = '';
+            for (let i = 0; i < safe; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'dot';
+                // 让最新一个圆点带 pop 动效，其它的复用即可
+                container.appendChild(dot);
+            }
+            if (safe > 0) {
+                container.classList.add('show');
+            } else {
+                container.classList.remove('show');
+            }
+        }
+
         window.showAnimation = showAnimation;
         window.hideAnimation = hideAnimation;
+        window.setDotCount = setDotCount;
     </script>
 </body>
 </html>
@@ -383,6 +435,12 @@ def main():
 
                     elif action == 'hide':
                         window.evaluate_js("hideAnimation()")
+
+                    elif action == 'dots':
+                        count = int(cmd.get('count', 0))
+                        # 圆点持续可见，需要保证窗口在最上层
+                        _apply_window_config_async()
+                        window.evaluate_js(f"setDotCount({count})")
 
                     elif action == 'quit':
                         window.destroy()

@@ -83,3 +83,79 @@ def get_all_permissions() -> dict:
         "accessibility": check_accessibility(),
         "input_monitoring": check_input_monitoring(),
     }
+
+
+def get_bundle_identifier() -> str:
+    """获取当前应用的 Bundle Identifier"""
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        if bundle:
+            bundle_id = bundle.bundleIdentifier()
+            if bundle_id:
+                return str(bundle_id)
+    except Exception as e:
+        logger.warning(f"无法获取 Bundle Identifier: {e}")
+    # 如果无法获取，返回默认值
+    return "com.voicetextenhancer.app"
+
+
+def reset_permissions() -> Tuple[bool, str]:
+    """
+    重置应用的系统权限（辅助功能 + 输入监控）
+    需要用户重新授权
+
+    Returns:
+        (success, message): 成功标志和消息
+    """
+    bundle_id = get_bundle_identifier()
+    logger.info(f"准备重置权限，Bundle ID: {bundle_id}")
+
+    results = []
+    errors = []
+
+    # 重置辅助功能权限
+    try:
+        result = subprocess.run(
+            ['tccutil', 'reset', 'Accessibility', bundle_id],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            results.append("✓ 辅助功能权限已重置")
+            logger.info("辅助功能权限重置成功")
+        else:
+            error_msg = result.stderr.strip() or "未知错误"
+            errors.append(f"✗ 辅助功能重置失败: {error_msg}")
+            logger.error(f"辅助功能权限重置失败: {error_msg}")
+    except Exception as e:
+        errors.append(f"✗ 辅助功能重置异常: {str(e)}")
+        logger.exception("重置辅助功能权限时发生异常")
+
+    # 重置输入监控权限
+    try:
+        result = subprocess.run(
+            ['tccutil', 'reset', 'ListenEvent', bundle_id],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            results.append("✓ 输入监控权限已重置")
+            logger.info("输入监控权限重置成功")
+        else:
+            error_msg = result.stderr.strip() or "未知错误"
+            errors.append(f"✗ 输入监控重置失败: {error_msg}")
+            logger.error(f"输入监控权限重置失败: {error_msg}")
+    except Exception as e:
+        errors.append(f"✗ 输入监控重置异常: {str(e)}")
+        logger.exception("重置输入监控权限时发生异常")
+
+    # 汇总结果
+    if errors:
+        message = "\n".join(results + errors)
+        return False, message
+    else:
+        message = "\n".join(results)
+        return True, message

@@ -680,7 +680,15 @@ def main():
     """在主线程运行 webview"""
     import webview
 
-    _hide_dock_icon()
+    # 必须在 import webview 和创建窗口之前设置 activation policy
+    # 否则 webview 会创建默认的应用实例,导致 Dock 图标显示
+    try:
+        from AppKit import NSApplication
+        # NSApplicationActivationPolicyAccessory = 1
+        # 确保应用不在 Dock 中显示图标
+        NSApplication.sharedApplication().setActivationPolicy_(1)
+    except Exception as e:
+        print(f"设置 activation policy 失败: {e}", file=sys.stderr)
 
     api = API()
     window = webview.create_window(
@@ -690,6 +698,8 @@ def main():
         height=720,
         resizable=False,
         js_api=api,
+        # 确保窗口不会触发主应用在 Dock 中显示
+        on_top=False,
     )
     webview.start(debug=False)
 

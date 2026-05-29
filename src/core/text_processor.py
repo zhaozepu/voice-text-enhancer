@@ -5,6 +5,7 @@
 import time
 import asyncio
 import pyautogui
+from typing import List, Optional
 from loguru import logger
 
 import os
@@ -42,13 +43,52 @@ class TextProcessor:
             logger.info("收到取消请求，正在取消任务...")
             self._cancelled = True
 
-    async def process_selected_text(self, with_screenshot: bool = False):
+    async def capture_ocr_only(self) -> Optional[str]:
+        """
+        只截屏 + OCR（不调用模型，不修改剪贴板）
+        用于"暂存上下文"流程：用户先用组合键收集屏幕上下文，再用单键触发处理
+
+        Returns:
+            OCR 文本；如果截屏失败返回 None
+        """
+        from ..utils.screen_ocr import capture_and_ocr, ScreenCaptureError
+
+        logger.info("开始仅 OCR 流程（暂存上下文）")
+        screenshot_path = None
+        try:
+            screen_text, screenshot_path = await asyncio.to_thread(capture_and_ocr)
+            logger.info(f"OCR 完成，文本长度: {len(screen_text)}")
+            if screen_text:
+                logger.info(f"OCR 文本内容: {screen_text[:100]}..." if len(screen_text) > 100 else f"OCR 文本内容: {screen_text}")
+            return screen_text
+        except ScreenCaptureError as e:
+            logger.error(f"{e}")
+            close_fancy_notification()
+            await asyncio.sleep(0.1)
+            show_fancy_error("✗ 缺少屏幕录制权限", duration=3)
+            return None
+        except Exception as e:
+            logger.exception(f"OCR 流程异常: {e}")
+            return None
+        finally:
+            if screenshot_path:
+                try:
+                    os.unlink(screenshot_path)
+                except Exception:
+                    pass
+
+    async def process_selected_text(
+        self,
+        with_screenshot: bool = False,
+        screen_contexts: Optional[List[str]] = None,
+    ):
         """
         处理当前选中的文本
         这是主要的处理流程入口
 
         Args:
             with_screenshot: 为 True 时走"截屏 + 选中文本 → 模型 → 剪贴板"流程，不替换原文
+            screen_contexts: 暂存的屏幕 OCR 上下文列表，作为模型的额外上下文
         """
         if self._processing:
             logger.warning("正在处理中，忽略重复触发")
@@ -61,7 +101,7 @@ class TextProcessor:
             if with_screenshot:
                 await self._do_process_screenshot()
             else:
-                await self._do_process(with_screenshot=False)
+                await self._do_process(with_screenshot=False, screen_contexts=screen_contexts)
         except asyncio.CancelledError:
             logger.info("任务已被用户取消")
             close_fancy_notification()
@@ -92,6 +132,7 @@ class TextProcessor:
             try:
                 screen_text, screenshot_path = await asyncio.to_thread(capture_and_ocr)
                 logger.info(f"屏幕 OCR 文本长度: {len(screen_text)}")
+                logger.info(f"屏幕 OCR 文本内容: {screen_text[:100]}..." if len(screen_text) > 100 else f"屏幕 OCR 文本内容: {screen_text}")
             except ScreenCaptureError as e:
                 logger.error(f"{e}")
                 close_fancy_notification()
@@ -107,6 +148,7 @@ class TextProcessor:
             if not selected_text or not selected_text.strip():
                 selected_text = "（用户未选中文本，请基于屏幕 OCR 内容自行判断需要处理的对象）"
             logger.info(f"选中文本长度: {len(selected_text)}")
+            logger.info(f"选中文本内容: {selected_text[:100]}..." if len(selected_text) > 100 else f"选中文本内容: {selected_text}")
 
             if self._cancelled:
                 raise asyncio.CancelledError()
@@ -146,15 +188,32 @@ class TextProcessor:
                 except Exception:
                     pass
 
-    async def _do_process(self, with_screenshot: bool = False):
+    async def _do_process(
+        self,
+        with_screenshot: bool = False,
+        screen_contexts: Optional[List[str]] = None,
+    ):
         """
         执行实际的文本处理流程
+
+        Args:
+            with_screenshot: 暂未使用（截屏流程走 _do_process_screenshot）
+            screen_contexts: 暂存的屏幕 OCR 上下文列表
         """
-        logger.info(f"开始处理流程 (with_screenshot={with_screenshot})")
+        logger.info(f"开始处理流程 (with_screenshot={with_screenshot}, 暂存上下文数: {len(screen_contexts) if screen_contexts else 0})")
         original_clipboard = self.clipboard_mgr.save()
         logger.info(f"保存原剪贴板，长度: {len(original_clipboard) if original_clipboard else 0}")
 
+        # 把暂存的多段 OCR 上下文拼接为一段屏幕文本
         screen_text = ""
+        if screen_contexts:
+            parts = []
+            for i, ctx in enumerate(screen_contexts, 1):
+                if ctx and ctx.strip():
+                    parts.append(f"--- 上下文 {i} ---\n{ctx}")
+            screen_text = "\n\n".join(parts)
+            logger.info(f"使用 {len(parts)} 段暂存上下文，合计长度: {len(screen_text)}")
+
         screenshot_path = None
 
         try:
@@ -268,6 +327,10 @@ class TextProcessor:
 
         text = self.clipboard_mgr.paste()
         logger.info(f"从剪贴板读取到文本长度: {len(text) if text else 0}")
+        if text:
+            logger.info(f"从剪贴板读取到的文本内容: {text[:100]}..." if len(text) > 100 else f"从剪贴板读取到的文本内容: {text}")
+        else:
+            logger.warning("剪贴板为空,可能光标未聚焦在输入框或输入框为空")
         return text
 
     async def _enhance_text(self, text: str, screen_text: str = "") -> str:
@@ -298,8 +361,14 @@ class TextProcessor:
                 "【需要处理的文本】\n"
                 f"{text}"
             )
+            logger.info(f"已将屏幕 OCR 上下文注入用户消息（OCR 长度 {len(screen_text)}，合并后总长度 {len(text)}）")
+        else:
+            logger.info("无屏幕 OCR 上下文，直接处理选中文本")
 
         logger.info(f"使用 Prompt: {active_prompt_name}")
+        # 完整发给模型的内容预览（截断 300 字符避免日志过长）
+        preview = text if len(text) <= 300 else text[:300] + "...(truncated)"
+        logger.info(f"发送给模型的用户消息预览:\n{preview}")
 
         enhanced_text = await self.api_client.enhance_text(text, prompt_template)
 
