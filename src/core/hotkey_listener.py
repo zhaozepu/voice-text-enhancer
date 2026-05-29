@@ -106,9 +106,9 @@ class HotkeyListener:
         key_map = {
             'right_option': Key.alt_r,
             'right_alt': Key.alt_r,
-            # 左 Option：pynput 在 macOS 上一般报 Key.alt_l；Key.alt 作 fallback
-            'left_option': getattr(Key, 'alt_l', Key.alt),
-            'left_alt': getattr(Key, 'alt_l', Key.alt),
+            # 左 Option：pynput 在 macOS 上左 Option 报为 Key.alt（不是 alt_l）
+            'left_option': Key.alt,
+            'left_alt': Key.alt,
             'right_cmd': Key.cmd_r,
             'right_ctrl': Key.ctrl_r,
             'esc': Key.esc,
