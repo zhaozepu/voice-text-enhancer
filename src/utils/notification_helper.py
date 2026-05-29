@@ -21,13 +21,15 @@ def get_lottie_path() -> Path:
 
 
 def get_html(lottie_data: str) -> str:
-    """生成 HTML 内容 - 仅 Lottie 动画，透明背景，无框无字"""
+    """生成 HTML 内容 - 彩色 CSS 动效，透明背景，无框无字
+
+    lottie_data 参数保留以兼容旧调用，但当前不再使用 Lottie。
+    """
     return """
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.9.4/lottie.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -38,37 +40,97 @@ def get_html(lottie_data: str) -> str:
             overflow: hidden;
         }
 
-        .lottie-box {
+        .anim-box {
             position: fixed;
             top: 0;
             left: 50%;
             transform: translateX(-50%) translateY(-10px);
-            width: 120px;
-            height: 120px;
+            width: 100px;
+            height: 100px;
             opacity: 0;
             transition: opacity 0.3s ease, transform 0.3s ease;
             pointer-events: none;
         }
 
-        .lottie-box.show {
+        .anim-box.show {
             opacity: 1;
             transform: translateX(-50%) translateY(0);
         }
 
-        /* 暗色模式下反相，让黑色动效在深色背景下可见 */
-        @media (prefers-color-scheme: dark) {
-            .lottie-box {
-                filter: invert(1) hue-rotate(180deg);
-            }
+        /* 彩色环：用 conic-gradient 生成绚丽渐变，再用 mask 抠出环形 */
+        .ring {
+            position: absolute;
+            inset: 8px;
+            border-radius: 50%;
+            background: conic-gradient(
+                from 0deg,
+                #ff006e,
+                #fb5607,
+                #ffbe0b,
+                #06ffa5,
+                #3a86ff,
+                #8338ec,
+                #ff006e
+            );
+            -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%);
+            mask: radial-gradient(circle, transparent 56%, #000 58%);
+            filter: drop-shadow(0 0 6px rgba(255, 100, 200, 0.5))
+                    drop-shadow(0 0 10px rgba(80, 180, 255, 0.35));
+            animation: spin 1.4s linear infinite;
+        }
+
+        /* 内层反向旋转的高光弧 */
+        .ring::after {
+            content: '';
+            position: absolute;
+            inset: 8px;
+            border-radius: 50%;
+            background: conic-gradient(
+                from 90deg,
+                rgba(255,255,255,0.9) 0deg,
+                rgba(255,255,255,0) 60deg,
+                rgba(255,255,255,0) 360deg
+            );
+            -webkit-mask: radial-gradient(circle, transparent 50%, #000 52%, #000 70%, transparent 72%);
+            mask: radial-gradient(circle, transparent 50%, #000 52%, #000 70%, transparent 72%);
+            animation: spin-reverse 0.9s linear infinite;
+            mix-blend-mode: screen;
+        }
+
+        /* 中央柔光点 */
+        .core {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 18px;
+            height: 18px;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            background: radial-gradient(circle, #ffffff 0%, rgba(255,255,255,0.6) 40%, rgba(255,255,255,0) 70%);
+            animation: pulse 1.4s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes spin-reverse {
+            to { transform: rotate(-360deg); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(0.85); }
+            50%     { opacity: 1.0; transform: translate(-50%, -50%) scale(1.15); }
         }
     </style>
 </head>
 <body>
-    <div class="lottie-box" id="lottie-box"></div>
+    <div class="anim-box" id="anim-box">
+        <div class="ring"></div>
+        <div class="core"></div>
+    </div>
 
     <script>
-        const LOTTIE_DATA = __LOTTIE_DATA__;
-        let lottieAnim = null;
         let hideTimer = null;
 
         function showAnimation(duration) {
@@ -77,21 +139,7 @@ def get_html(lottie_data: str) -> str:
                 hideTimer = null;
             }
 
-            const box = document.getElementById('lottie-box');
-            if (lottieAnim) {
-                lottieAnim.destroy();
-                lottieAnim = null;
-            }
-            box.innerHTML = '';
-
-            lottieAnim = lottie.loadAnimation({
-                container: box,
-                renderer: 'svg',
-                loop: true,
-                autoplay: true,
-                animationData: LOTTIE_DATA
-            });
-
+            const box = document.getElementById('anim-box');
             requestAnimationFrame(() => {
                 box.classList.add('show');
             });
@@ -102,15 +150,8 @@ def get_html(lottie_data: str) -> str:
         }
 
         function hideAnimation() {
-            const box = document.getElementById('lottie-box');
+            const box = document.getElementById('anim-box');
             box.classList.remove('show');
-            setTimeout(() => {
-                if (lottieAnim) {
-                    lottieAnim.destroy();
-                    lottieAnim = null;
-                }
-                box.innerHTML = '';
-            }, 300);
         }
 
         window.showAnimation = showAnimation;
@@ -118,7 +159,7 @@ def get_html(lottie_data: str) -> str:
     </script>
 </body>
 </html>
-""".replace("__LOTTIE_DATA__", lottie_data)
+"""
 
 
 def read_lottie_data() -> str:
