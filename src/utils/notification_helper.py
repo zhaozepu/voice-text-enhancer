@@ -45,8 +45,8 @@ def get_html(lottie_data: str) -> str:
             top: 0;
             left: 50%;
             transform: translateX(-50%) translateY(-10px);
-            width: 100px;
-            height: 100px;
+            width: 64px;
+            height: 64px;
             opacity: 0;
             transition: opacity 0.3s ease, transform 0.3s ease;
             pointer-events: none;
@@ -57,7 +57,7 @@ def get_html(lottie_data: str) -> str:
             transform: translateX(-50%) translateY(0);
         }
 
-        /* 彩色环：用 conic-gradient 生成绚丽渐变，再用 mask 抠出环形 */
+        /* 彩色环：用 conic-gradient 生成绚丽渐变，再用 mask 抠出细环 */
         .ring {
             position: absolute;
             inset: 8px;
@@ -72,43 +72,61 @@ def get_html(lottie_data: str) -> str:
                 #8338ec,
                 #ff006e
             );
-            -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%);
-            mask: radial-gradient(circle, transparent 56%, #000 58%);
-            filter: drop-shadow(0 0 6px rgba(255, 100, 200, 0.5))
-                    drop-shadow(0 0 10px rgba(80, 180, 255, 0.35));
+            /* 细环：环厚度约占半径的 7%，并有羽化边 */
+            -webkit-mask: radial-gradient(circle closest-side,
+                transparent 78%,
+                #000 88%,
+                #000 96%,
+                transparent 100%);
+            mask: radial-gradient(circle closest-side,
+                transparent 78%,
+                #000 88%,
+                #000 96%,
+                transparent 100%);
+            filter: drop-shadow(0 0 5px rgba(255, 100, 200, 0.55))
+                    drop-shadow(0 0 9px rgba(80, 180, 255, 0.4));
             animation: spin 1.4s linear infinite;
         }
 
-        /* 内层反向旋转的高光弧 */
+        /* 反向旋转的白色高光弧（更细） */
         .ring::after {
             content: '';
             position: absolute;
-            inset: 8px;
+            inset: 0;
             border-radius: 50%;
             background: conic-gradient(
                 from 90deg,
-                rgba(255,255,255,0.9) 0deg,
-                rgba(255,255,255,0) 60deg,
+                rgba(255,255,255,0.95) 0deg,
+                rgba(255,255,255,0) 50deg,
                 rgba(255,255,255,0) 360deg
             );
-            -webkit-mask: radial-gradient(circle, transparent 50%, #000 52%, #000 70%, transparent 72%);
-            mask: radial-gradient(circle, transparent 50%, #000 52%, #000 70%, transparent 72%);
-            animation: spin-reverse 0.9s linear infinite;
+            -webkit-mask: radial-gradient(circle closest-side,
+                transparent 82%,
+                #000 89%,
+                #000 95%,
+                transparent 100%);
+            mask: radial-gradient(circle closest-side,
+                transparent 82%,
+                #000 89%,
+                #000 95%,
+                transparent 100%);
+            animation: spin-reverse 1.0s linear infinite;
             mix-blend-mode: screen;
         }
 
-        /* 中央柔光点 */
+        /* 中央柔光点（呼吸） */
         .core {
             position: absolute;
             top: 50%;
             left: 50%;
-            width: 18px;
-            height: 18px;
+            width: 28px;
+            height: 28px;
             transform: translate(-50%, -50%);
             border-radius: 50%;
-            background: radial-gradient(circle, #ffffff 0%, rgba(255,255,255,0.6) 40%, rgba(255,255,255,0) 70%);
+            background: radial-gradient(circle, #ffd6e0 0%, rgba(255,182,200,0.55) 45%, rgba(255,182,200,0.12) 78%, rgba(255,182,200,0) 100%);
             animation: pulse 1.4s ease-in-out infinite;
         }
+
 
         @keyframes spin {
             to { transform: rotate(360deg); }
@@ -119,8 +137,8 @@ def get_html(lottie_data: str) -> str:
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(0.85); }
-            50%     { opacity: 1.0; transform: translate(-50%, -50%) scale(1.15); }
+            0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.85); }
+            50%     { opacity: 0.85; transform: translate(-50%, -50%) scale(1.12); }
         }
     </style>
 </head>
