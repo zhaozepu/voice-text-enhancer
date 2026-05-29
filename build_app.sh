@@ -13,7 +13,7 @@ echo "[1/5] 激活虚拟环境..."
 source venv/bin/activate
 
 echo "[2/5] 清理旧的构建文件..."
-rm -rf build dist VoiceTextEnhancer.app
+rm -rf build dist VoiceTextEnhancer.app "润色.app"
 echo "✓ 清理完成"
 
 echo ""
@@ -30,11 +30,11 @@ echo "✓ 打包完成"
 echo ""
 echo "[4/5] 复制配置文件到应用内..."
 # 创建配置目录
-mkdir -p "dist/VoiceTextEnhancer.app/Contents/Resources/config"
+mkdir -p "dist/润色.app/Contents/Resources/config"
 
 # 复制配置文件
-cp config.example.yaml "dist/VoiceTextEnhancer.app/Contents/Resources/config/"
-cp .env.example "dist/VoiceTextEnhancer.app/Contents/Resources/config/"
+cp config.example.yaml "dist/润色.app/Contents/Resources/config/"
+cp .env.example "dist/润色.app/Contents/Resources/config/"
 
 echo "✓ 配置文件已复制"
 
@@ -53,11 +53,11 @@ echo "================================"
 echo "打包完成！"
 echo "================================"
 echo ""
-echo "应用位置: dist/VoiceTextEnhancer.app"
+echo "应用位置: dist/润色.app"
 echo ""
 echo "下一步："
 echo "1. 移动到 /Applications:"
-echo "   cp -r dist/VoiceTextEnhancer.app /Applications/"
+echo "   cp -r dist/润色.app /Applications/"
 echo ""
 echo "2. 双击启动应用，菜单栏会出现 ✨ 图标"
 echo ""

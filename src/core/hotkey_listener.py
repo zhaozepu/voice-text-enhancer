@@ -33,13 +33,38 @@ class HotkeyListener:
         # 组合键绑定：hotkey_str -> {hotkey对象, callback, name}
         self.combo_key_bindings = {}
 
+        # 序列绑定：(first_key_obj, second_key_obj) -> {callback, name, max_gap_sec}
+        # 形如 "left_option>right_option" 表示先 tap 第一个键、再 tap 第二个键
+        self.sequence_bindings = {}
+        # 序列状态：first_key_obj -> last_release_time（最近一次 tap 完成时间）
+        self._sequence_pending = {}
+        # 序列触发后，吞掉紧随其后的第二个键的单键触发
+        self._sequence_consumed_keys = set()
+
         # 解析所有绑定
         for binding in bindings:
             hotkey_str = binding['hotkey']
             callback = binding['callback']
             name = binding.get('name', hotkey_str)
 
-            if hotkey_str in ['right_option', 'right_alt', 'left_option', 'left_alt', 'right_cmd', 'right_ctrl', 'esc']:
+            if '>' in hotkey_str:
+                # 序列绑定：first>second
+                parts = [p.strip() for p in hotkey_str.split('>')]
+                if len(parts) != 2:
+                    logger.error(f"序列快捷键格式错误({hotkey_str}), 应为 'a>b'")
+                    continue
+                first_key = self._parse_single_key(parts[0])
+                second_key = self._parse_single_key(parts[1])
+                if first_key is None or second_key is None:
+                    logger.error(f"序列快捷键键名解析失败: {hotkey_str}")
+                    continue
+                self.sequence_bindings[(first_key, second_key)] = {
+                    'callback': callback,
+                    'name': name,
+                    'max_gap': binding.get('max_gap_sec', 0.8),
+                }
+                logger.info(f"已注册序列绑定: {name} ({hotkey_str})")
+            elif hotkey_str in ['right_option', 'right_alt', 'left_option', 'left_alt', 'right_cmd', 'right_ctrl', 'esc']:
                 # 单键模式
                 key_obj = self._parse_single_key(hotkey_str)
                 if key_obj:
@@ -113,16 +138,65 @@ class HotkeyListener:
 
     def _on_release(self, key):
         """按键释放事件"""
+        now = time.time()
+
+        # 序列绑定检测：当前 release 是否是某序列的"第二个键"？
+        sequence_triggered = False
+        for (first_key, second_key), seq in self.sequence_bindings.items():
+            if key == second_key:
+                # 检查是否在 max_gap 内 tap 过 first_key
+                last_first_release = self._sequence_pending.get(first_key)
+                # 同时校验 second_key 自身这次也是 tap（按压时长 < 0.5s）
+                second_pressed_at = (
+                    self.single_key_bindings.get(key, {}).get('last_press_time', 0)
+                )
+                second_press_duration = now - second_pressed_at if second_pressed_at else 1.0
+                if (
+                    last_first_release
+                    and (now - last_first_release) <= seq['max_gap']
+                    and second_press_duration < 0.5
+                ):
+                    logger.info(f"序列触发: {seq['name']} ({first_key} → {second_key}), 间隔 {now - last_first_release:.3f}s")
+                    self._sequence_pending.pop(first_key, None)
+                    self._sequence_consumed_keys.add(key)
+                    try:
+                        seq['callback']()
+                    except Exception as e:
+                        logger.exception(f"序列回调失败 ({seq['name']}): {e}")
+                    sequence_triggered = True
+                    break
+
+        # 序列绑定检测：当前 release 是否是某序列的"第一个键"？
+        # 仅记录 tap 完成时间，不触发任何单键回调（如果该键也是序列首键）
+        is_sequence_first = any(key == fk for (fk, _sk) in self.sequence_bindings.keys())
+        if is_sequence_first and not sequence_triggered:
+            # 仅当此键是 tap（按压短）才视为有效首键
+            first_pressed_at = (
+                self.single_key_bindings.get(key, {}).get('last_press_time', 0)
+            )
+            press_duration = now - first_pressed_at if first_pressed_at else 1.0
+            if press_duration < 0.5:
+                self._sequence_pending[key] = now
+                logger.debug(f"序列首键已就绪: {key}, 等待第二键 (≤{0.8}s)")
+
         # 检查单键绑定
         if key in self.single_key_bindings:
             binding = self.single_key_bindings[key]
             if binding['pressed']:
-                release_time = time.time()
+                release_time = now
                 press_duration = release_time - binding['last_press_time']
 
                 # ESC 键总是触发（用于取消任务），其他键只在快速按下释放时触发
                 is_esc = (key == Key.esc)
                 should_trigger = is_esc or (press_duration < 0.5)
+
+                # 若此次释放刚刚被序列吞掉，则跳过单键触发（避免序列触发后又触发右 Option 的默认动作）
+                if key in self._sequence_consumed_keys:
+                    self._sequence_consumed_keys.discard(key)
+                    should_trigger = False
+                # 若此键是某序列的"首键"，本次 tap 应预留给序列；不立即触发其单键回调
+                elif is_sequence_first and not sequence_triggered:
+                    should_trigger = False
 
                 if should_trigger:
                     logger.debug(f"单键触发: {binding['name']}，按压时长: {press_duration:.3f}秒")
@@ -131,7 +205,7 @@ class HotkeyListener:
                     except Exception as e:
                         logger.exception(f"回调函数执行失败 ({binding['name']}): {e}")
                 else:
-                    logger.debug(f"按压时长过长({press_duration:.3f}秒)，忽略")
+                    logger.debug(f"按压时长过长或被序列吞掉({press_duration:.3f}秒)，忽略")
 
                 binding['pressed'] = False
 

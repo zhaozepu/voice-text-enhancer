@@ -77,17 +77,39 @@ class NotificationProcess:
             return False
 
     def shutdown(self):
-        """关闭通知进程"""
-        if self.process and self.process.poll() is None:
-            try:
-                self.send_command({'action': 'quit'})
-                self.process.wait(timeout=1)
-            except Exception:
-                try:
-                    self.process.kill()
-                except Exception:
-                    pass
+        """关闭通知进程（确保子进程一定退出，避免孤儿动效残留）"""
+        if not self.process:
+            return
+        if self.process.poll() is not None:
             self.process = None
+            return
+
+        # 先尝试优雅退出
+        try:
+            self.send_command({'action': 'quit'})
+        except Exception:
+            pass
+        try:
+            self.process.wait(timeout=0.8)
+        except Exception:
+            pass
+
+        # 兜底：terminate
+        if self.process.poll() is None:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=0.5)
+            except Exception:
+                pass
+
+        # 最后兜底：SIGKILL
+        if self.process.poll() is None:
+            try:
+                self.process.kill()
+            except Exception:
+                pass
+
+        self.process = None
 
 
 _notif_process: Optional[NotificationProcess] = None

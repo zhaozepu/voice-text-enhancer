@@ -7,6 +7,7 @@ import asyncio
 import pyautogui
 from loguru import logger
 
+import os
 from .clipboard_manager import ClipboardManager
 from ..api.deepseek_client import DeepSeekClient
 from ..utils.notifications import show_info, show_error, show_success
@@ -41,10 +42,13 @@ class TextProcessor:
             logger.info("收到取消请求，正在取消任务...")
             self._cancelled = True
 
-    async def process_selected_text(self):
+    async def process_selected_text(self, with_screenshot: bool = False):
         """
         处理当前选中的文本
         这是主要的处理流程入口
+
+        Args:
+            with_screenshot: 为 True 时先截屏并对图片 OCR，把结果作为上下文与文本一起送给模型
         """
         if self._processing:
             logger.warning("正在处理中，忽略重复触发")
@@ -54,7 +58,7 @@ class TextProcessor:
         self._cancelled = False  # 重置取消标志
 
         try:
-            await self._do_process()
+            await self._do_process(with_screenshot=with_screenshot)
         except asyncio.CancelledError:
             logger.info("任务已被用户取消")
             close_fancy_notification()
@@ -69,13 +73,32 @@ class TextProcessor:
             self._processing = False
             self._cancelled = False
 
-    async def _do_process(self):
+    async def _do_process(self, with_screenshot: bool = False):
         """
         执行实际的文本处理流程
         """
-        logger.info("开始处理流程")
+        logger.info(f"开始处理流程 (with_screenshot={with_screenshot})")
         original_clipboard = self.clipboard_mgr.save()
         logger.info(f"保存原剪贴板，长度: {len(original_clipboard) if original_clipboard else 0}")
+
+        # 若需要截屏：先截屏，再读取选中文本（截屏要求屏幕处于触发瞬间的状态）
+        screen_text = ""
+        screenshot_path = None
+        if with_screenshot:
+            try:
+                from ..utils.screen_ocr import capture_and_ocr, ScreenCaptureError
+                screen_text, screenshot_path = await asyncio.to_thread(capture_and_ocr)
+                logger.info(f"屏幕 OCR 文本长度: {len(screen_text)}")
+            except ScreenCaptureError as e:
+                logger.error(f"{e}")
+                close_fancy_notification()
+                await asyncio.sleep(0.1)
+                show_fancy_error("✗ 缺少屏幕录制权限", duration=3)
+                self.clipboard_mgr.restore(original_clipboard)
+                return
+            except Exception as e:
+                logger.exception(f"截屏 OCR 失败: {e}")
+                screen_text = ""
 
         try:
             selected_text = await self._get_selected_text()
@@ -112,7 +135,7 @@ class TextProcessor:
                 raise asyncio.CancelledError()
 
             # 动效已在快捷键触发时显示，这里直接处理
-            enhanced_text = await self._enhance_text(selected_text)
+            enhanced_text = await self._enhance_text(selected_text, screen_text=screen_text)
 
             # 检查是否被取消
             if self._cancelled:
@@ -151,6 +174,14 @@ class TextProcessor:
             self.clipboard_mgr.restore(original_clipboard)
             logger.info("剪贴板已恢复")
 
+            # 清理截屏临时文件
+            if screenshot_path:
+                try:
+                    os.unlink(screenshot_path)
+                    logger.info(f"已清理截屏临时文件: {screenshot_path}")
+                except Exception:
+                    pass
+
     async def _get_selected_text(self) -> str:
         """
         自动全选并获取输入框内的所有文本
@@ -182,12 +213,13 @@ class TextProcessor:
         logger.info(f"从剪贴板读取到文本长度: {len(text) if text else 0}")
         return text
 
-    async def _enhance_text(self, text: str) -> str:
+    async def _enhance_text(self, text: str, screen_text: str = "") -> str:
         """
         调用 API 增强文本
 
         Args:
             text: 原始文本
+            screen_text: 屏幕 OCR 文本（可选，作为上下文）
 
         Returns:
             增强后的文本
@@ -200,6 +232,15 @@ class TextProcessor:
             active_prompt_name = 'expand'
 
         prompt_template = prompts.get(active_prompt_name, '')
+
+        # 如果有屏幕 OCR 上下文，把它作为额外信息附在用户消息前
+        if screen_text and screen_text.strip():
+            text = (
+                "【当前屏幕 OCR 文本（仅作为上下文参考）】\n"
+                f"{screen_text}\n"
+                "【需要处理的文本】\n"
+                f"{text}"
+            )
 
         logger.info(f"使用 Prompt: {active_prompt_name}")
 

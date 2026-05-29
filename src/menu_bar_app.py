@@ -155,6 +155,35 @@ class BackgroundWorker:
                     'name': prompt_name
                 })
 
+            # 序列绑定（如 left_option > right_option）：触发截屏 + OCR + 文本处理
+            for binding in self.config.get('sequence_bindings', []):
+                hotkey_str = binding['hotkey']  # 形如 "left_option>right_option"
+                prompt_name = binding.get('prompt_name', 'typeless')
+                prompt_content = binding.get('prompt_content', '')
+                max_gap = binding.get('max_gap_sec', 0.8)
+
+                def make_seq_callback(pname, pcontent):
+                    def on_sequence():
+                        logger.info(f"序列快捷键触发(带截屏): {pname}")
+                        if self.config.get('notifications', {}).get('show_processing', True):
+                            show_desktop_processing("正在截屏并处理…")
+                        # 临时切 prompt
+                        self.config['active_prompt'] = pname
+                        if 'prompts' not in self.config:
+                            self.config['prompts'] = {}
+                        self.config['prompts'][pname] = pcontent
+                        asyncio.run_coroutine_threadsafe(
+                            self.processor.process_selected_text(with_screenshot=True), loop
+                        )
+                    return on_sequence
+
+                bindings.append({
+                    'hotkey': hotkey_str,
+                    'callback': make_seq_callback(prompt_name, prompt_content),
+                    'name': f"{prompt_name}(截屏)",
+                    'max_gap_sec': max_gap,
+                })
+
             # 添加 ESC 键绑定，用于取消任务
             # 注意：只在有任务正在处理时才生效，避免对其他应用造成干扰
             def on_cancel():
@@ -224,7 +253,7 @@ class VoiceTextEnhancerApp(rumps.App):
         icon_path = self._get_icon_path()
 
         super().__init__(
-            name="VoiceTextEnhancer",
+            name="润色",
             icon=icon_path,  # 使用您提供的 PNG 图标
         )
 

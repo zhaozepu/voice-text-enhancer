@@ -25,6 +25,9 @@ pywebview>=6.0
 # macOS 菜单栏应用
 rumps>=0.4.0
 
+# macOS 本地 OCR (Vision 框架)
+pyobjc-framework-Vision>=10.0
+
 # 类型提示
 typing-extensions>=4.9.0
 

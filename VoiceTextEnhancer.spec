@@ -22,6 +22,8 @@ a = Analysis(
         'pyobjc-framework-Quartz',
         'pyobjc-framework-ApplicationServices',
         'pyobjc-framework-WebKit',
+        'pyobjc-framework-Vision',
+        'Vision',
         'pyobjc-core',
         'webview',
         'webview.platforms.cocoa',
@@ -74,12 +76,12 @@ coll = COLLECT(
 
 app = BUNDLE(
     coll,
-    name='VoiceTextEnhancer.app',
+    name='润色.app',
     icon='icon.icns',
     bundle_identifier='com.voicetextenhancer.app',
     info_plist={
-        'CFBundleName': 'Voice Text Enhancer',
-        'CFBundleDisplayName': 'Voice Text Enhancer',
+        'CFBundleName': '润色',
+        'CFBundleDisplayName': '润色',
         'CFBundleVersion': '1.0.0',
         'CFBundleShortVersionString': '1.0.0',
         'NSHighResolutionCapable': 'True',

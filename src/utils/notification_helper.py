@@ -203,6 +203,7 @@ def get_screen_size():
 def _apply_window_config_on_main_thread():
     """
     在主线程上执行实际的窗口配置（NSWindow 操作必须在主线程）
+    对 helper 子进程的所有 NSWindow 都应用一遍，并强制置顶。
     """
     try:
         from AppKit import (
@@ -222,20 +223,39 @@ def _apply_window_config_on_main_thread():
             | NSWindowCollectionBehaviorIgnoresCycle
         )
 
-        windows = list(NSApp.windows()) if NSApp else []
-        for win in windows:
+        if not NSApp:
+            return False
+
+        applied = False
+        for win in list(NSApp.windows()):
+            win.setCollectionBehavior_(behavior)
+            win.setLevel_(SCREEN_SAVER_LEVEL)
+            win.setIgnoresMouseEvents_(True)
+            # orderFrontRegardless 强制置顶但不抢焦点，能覆盖在全屏应用上
             try:
-                title = str(win.title()) if win.title() else ''
+                win.orderFrontRegardless()
             except Exception:
-                title = ''
-            if title == 'Notification':
-                win.setCollectionBehavior_(behavior)
-                win.setLevel_(SCREEN_SAVER_LEVEL)
-                win.setIgnoresMouseEvents_(True)
-                return True
+                pass
+            applied = True
+        return applied
     except Exception as e:
         print(f"_apply_window_config_on_main_thread: {e}", file=sys.stderr)
     return False
+
+
+def _apply_window_config_async():
+    """从任意线程触发主线程上的窗口配置（用于每次 show 时重应用，确保跨全屏 Space 可见）"""
+    try:
+        from Foundation import NSObject
+
+        class _Helper(NSObject):
+            def apply_(self, _):
+                _apply_window_config_on_main_thread()
+
+        h = _Helper.alloc().init()
+        h.performSelectorOnMainThread_withObject_waitUntilDone_("apply:", None, False)
+    except Exception as e:
+        print(f"_apply_window_config_async: {e}", file=sys.stderr)
 
 
 def configure_window_for_fullscreen():
@@ -280,6 +300,25 @@ def configure_window_for_fullscreen():
         print(f"configure_window_for_fullscreen: {e}", file=sys.stderr)
 
 
+def parent_watchdog():
+    """
+    监视父进程是否还活着；若父进程已死(PPID 变成 1)或 stdin 关闭，立即退出。
+    避免主进程崩溃时 helper 子进程成为孤儿，造成动效一直挂在屏幕上。
+    """
+    import time
+    initial_ppid = os.getppid()
+    while True:
+        time.sleep(1.0)
+        try:
+            current_ppid = os.getppid()
+        except Exception:
+            current_ppid = 1
+        # PPID 变成 1 = 父进程已死，被 launchd/init 接管
+        if current_ppid == 1 or current_ppid != initial_ppid:
+            print("notification_helper: 父进程已退出，自杀", file=sys.stderr)
+            os._exit(0)
+
+
 def hide_dock_icon():
     """将当前进程设置为 Accessory（不在 Dock 显示图标）"""
     try:
@@ -322,29 +361,40 @@ def main():
     # 后台线程：窗口创建后配置跨 Space + 屏保级别（覆盖全屏应用）
     threading.Thread(target=configure_window_for_fullscreen, daemon=True).start()
 
+    # 监视父进程，避免成为孤儿动效
+    threading.Thread(target=parent_watchdog, daemon=True).start()
+
     def stdin_listener():
-        """监听 stdin 命令"""
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                cmd = json.loads(line)
-                action = cmd.get('action')
+        """监听 stdin 命令；stdin 关闭(父进程死/管道断)立即退出"""
+        try:
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    cmd = json.loads(line)
+                    action = cmd.get('action')
 
-                if action == 'show':
-                    duration = cmd.get('duration', 0)
-                    window.evaluate_js(f"showAnimation({duration})")
+                    if action == 'show':
+                        duration = cmd.get('duration', 0)
+                        # 每次 show 时再应用一次窗口配置，确保覆盖在全屏应用之上
+                        _apply_window_config_async()
+                        window.evaluate_js(f"showAnimation({duration})")
 
-                elif action == 'hide':
-                    window.evaluate_js("hideAnimation()")
+                    elif action == 'hide':
+                        window.evaluate_js("hideAnimation()")
 
-                elif action == 'quit':
-                    window.destroy()
-                    os._exit(0)
+                    elif action == 'quit':
+                        window.destroy()
+                        os._exit(0)
 
-            except Exception as e:
-                print(f"NOTIFICATION_ERROR: {e}", file=sys.stderr)
+                except Exception as e:
+                    print(f"NOTIFICATION_ERROR: {e}", file=sys.stderr)
+        except Exception:
+            pass
+        # stdin 自然结束 = 父进程关闭了管道（通常意味着父进程已退出）
+        print("notification_helper: stdin 已关闭，自杀", file=sys.stderr)
+        os._exit(0)
 
     listener = threading.Thread(target=stdin_listener, daemon=True)
     listener.start()
