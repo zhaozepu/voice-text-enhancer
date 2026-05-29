@@ -4,7 +4,7 @@
 """
 from pynput import keyboard
 from pynput.keyboard import Key
-from typing import Callable, Optional, List, Dict
+from typing import Callable, Optional, List, Dict, Tuple
 from loguru import logger
 import time
 
@@ -40,6 +40,8 @@ class HotkeyListener:
         self._sequence_pending = {}
         # 序列触发后，吞掉紧随其后的第二个键的单键触发
         self._sequence_consumed_keys = set()
+        # 所有序列涉及的键，按下时间记录（不依赖 single_key_bindings）
+        self._sequence_press_time = {}
 
         # 解析所有绑定
         for binding in bindings:
@@ -104,13 +106,20 @@ class HotkeyListener:
         key_map = {
             'right_option': Key.alt_r,
             'right_alt': Key.alt_r,
-            'left_option': Key.alt,
-            'left_alt': Key.alt,
+            # 左 Option：pynput 在 macOS 上一般报 Key.alt_l；Key.alt 作 fallback
+            'left_option': getattr(Key, 'alt_l', Key.alt),
+            'left_alt': getattr(Key, 'alt_l', Key.alt),
             'right_cmd': Key.cmd_r,
             'right_ctrl': Key.ctrl_r,
             'esc': Key.esc,
         }
         return key_map.get(key_name)
+
+    def _is_sequence_key(self, key) -> Tuple[bool, bool]:
+        """判断该键在序列绑定中扮演的角色，返回 (is_first, is_second)"""
+        is_first = any(key == fk for (fk, _) in self.sequence_bindings.keys())
+        is_second = any(key == sk for (_, sk) in self.sequence_bindings.keys())
+        return is_first, is_second
 
     def _on_combo_activate(self, callback: Callable, name: str):
         """组合键激活时的回调"""
@@ -122,12 +131,20 @@ class HotkeyListener:
 
     def _on_press(self, key):
         """按键按下事件"""
+        now = time.time()
+
         # 检查单键绑定
         if key in self.single_key_bindings:
             binding = self.single_key_bindings[key]
             binding['pressed'] = True
-            binding['last_press_time'] = time.time()
+            binding['last_press_time'] = now
             logger.info(f"目标键按下: {binding['name']}")
+
+        # 序列键独立记录按下时间（即使该键没有单键绑定）
+        is_first, is_second = self._is_sequence_key(key)
+        if is_first or is_second:
+            self._sequence_press_time[key] = now
+            logger.debug(f"序列键按下: {key} @ {now:.3f}")
 
         # 通知所有组合键对象
         for combo_data in self.combo_key_bindings.values():
@@ -147,9 +164,7 @@ class HotkeyListener:
                 # 检查是否在 max_gap 内 tap 过 first_key
                 last_first_release = self._sequence_pending.get(first_key)
                 # 同时校验 second_key 自身这次也是 tap（按压时长 < 0.5s）
-                second_pressed_at = (
-                    self.single_key_bindings.get(key, {}).get('last_press_time', 0)
-                )
+                second_pressed_at = self._sequence_press_time.get(key, 0)
                 second_press_duration = now - second_pressed_at if second_pressed_at else 1.0
                 if (
                     last_first_release
@@ -168,16 +183,14 @@ class HotkeyListener:
 
         # 序列绑定检测：当前 release 是否是某序列的"第一个键"？
         # 仅记录 tap 完成时间，不触发任何单键回调（如果该键也是序列首键）
-        is_sequence_first = any(key == fk for (fk, _sk) in self.sequence_bindings.keys())
+        is_sequence_first, _ = self._is_sequence_key(key)
         if is_sequence_first and not sequence_triggered:
-            # 仅当此键是 tap（按压短）才视为有效首键
-            first_pressed_at = (
-                self.single_key_bindings.get(key, {}).get('last_press_time', 0)
-            )
+            # 用独立的按下时间表，不依赖 single_key_bindings
+            first_pressed_at = self._sequence_press_time.get(key, 0)
             press_duration = now - first_pressed_at if first_pressed_at else 1.0
             if press_duration < 0.5:
                 self._sequence_pending[key] = now
-                logger.debug(f"序列首键已就绪: {key}, 等待第二键 (≤{0.8}s)")
+                logger.info(f"序列首键已就绪: {key}, 等待第二键 (≤{0.8}s)")
 
         # 检查单键绑定
         if key in self.single_key_bindings:

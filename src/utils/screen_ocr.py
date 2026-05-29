@@ -24,9 +24,9 @@ def capture_screen() -> str:
     """
     fd, path = tempfile.mkstemp(prefix='vte_shot_', suffix='.png')
     os.close(fd)
-    # -x 静音, 默认主屏全屏
+    # 不加 -x：保留快门音，给用户截屏反馈
     result = subprocess.run(
-        ['screencapture', '-x', path],
+        ['screencapture', path],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
